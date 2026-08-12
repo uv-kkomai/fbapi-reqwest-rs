@@ -85,10 +85,12 @@ impl Fbapi {
         image_url: &str,
         caption: &str,
         is_carousel_item: bool,
+        check_retry_count: usize,
+        check_delay: usize,
         retry_count: usize,
         log: impl Fn(LogParams),
     ) -> Result<String, FbapiError> {
-        post(
+        let creation_id = post(
             &self.make_path(&format!("{}/media", account_igid)),
             &access_token,
             &image_url,
@@ -98,7 +100,22 @@ impl Fbapi {
             &self.client,
             &log,
         )
-        .await
+        .await?;
+
+        check_ig_media_loop(
+            &self.make_path(&format!(
+                "{}?fields=status,status_code&access_token={}",
+                creation_id, access_token
+            )),
+            check_retry_count,
+            check_delay,
+            retry_count,
+            &self.client,
+            &log,
+        )
+        .await?;
+
+        Ok(creation_id)
     }
 }
 
