@@ -278,6 +278,21 @@ async fn post_to_videos_tab(
     .await
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum VideoStatusDecision {
+    Ready,
+    Continue,
+    Failed,
+}
+
+fn decide_video_status(video_status: &str) -> VideoStatusDecision {
+    match video_status {
+        "ready" => VideoStatusDecision::Ready,
+        "processing" | "uploading" => VideoStatusDecision::Continue,
+        _ => VideoStatusDecision::Failed,
+    }
+}
+
 async fn check_loop(
     path: &str,
     retry_count: usize,
@@ -287,12 +302,40 @@ async fn check_loop(
     log: &impl Fn(LogParams),
 ) -> Result<(), FbapiError> {
     for _ in 0..check_retry_count {
-        match check(path, retry_count, client, log).await?.as_str() {
-            "ready" => return Ok(()),
-            "processing" => {}
-            _ => return Err(FbapiError::VideoError),
+        let video_status = check(path, retry_count, client, log).await?;
+        match decide_video_status(&video_status) {
+            VideoStatusDecision::Ready => return Ok(()),
+            VideoStatusDecision::Continue => {}
+            VideoStatusDecision::Failed => return Err(FbapiError::VideoError),
         }
         sleep_sec(check_video_delay).await;
     }
     Err(FbapiError::VideoTimeout)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_decide_video_status() {
+        let cases = vec![
+            ("ready", VideoStatusDecision::Ready),
+            ("processing", VideoStatusDecision::Continue),
+            ("uploading", VideoStatusDecision::Continue),
+            ("error", VideoStatusDecision::Failed),
+            ("expired", VideoStatusDecision::Failed),
+            ("", VideoStatusDecision::Failed),
+            ("READY", VideoStatusDecision::Failed),
+            ("unknown_status", VideoStatusDecision::Failed),
+        ];
+        for (video_status, expected) in cases {
+            assert_eq!(
+                decide_video_status(video_status),
+                expected,
+                "video_status: {}",
+                video_status
+            );
+        }
+    }
 }
